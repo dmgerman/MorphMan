@@ -583,6 +583,34 @@ def save_db_locations(cur, locations, morph_to_id, tname='locations'):
 
     cur.executemany("INSERT INTO %s (%s) VALUES(?,?,?,?,?,?,?);"%(tname,fields), tuples)
         
+def save_db_files(cur, files):
+    tname = 'files'
+    # save a morphman db as a table in database
+    #
+    # morph_to_id is a dictionary that maps a morph class to its integer
+    # as stored in the database
+    #
+    # fields for the table
+    fields = "fileidx, filename, filetype"
+
+    # it is usually faster to drop the table than delete/update the tuples
+    # in it
+
+    drop_table(cur, tname)
+    create_table(cur, tname, fields,
+                 ", primary key(fileidx), unique(filename)"
+                 )
+#                     ", primary key (morphid, noteid, field), foreign key (morphid) references morphs")
+
+    # the list of files is in order, add an integer identifier
+    tuples = map(lambda file:
+                 (file[0], file[1][0], file[1][1]),
+                 enumerate(files))
+
+    cur.executemany("INSERT INTO %s (%s) VALUES(?,?,?);"%(tname,fields), tuples)
+        
+
+
 def save_db_lines(cur, fileidx, lines, do_create_table= False):
     tname = 'lines'
     # save a morphman db as a table in database
@@ -597,8 +625,8 @@ def save_db_lines(cur, fileidx, lines, do_create_table= False):
     # in it
     if do_create_table:
         drop_table(cur, tname)
-        create_table(cur, tname, fields)
-#                     ", primary key (morphid, noteid, field), foreign key (morphid) references morphs")
+        create_table(cur, tname, fields,
+                     ", foreign key (fileidx) references files")
 
     def convert_each_line(lineno, morphs):
         result = list(map(lambda m: [fileidx, lineno, m[0], m[1]], enumerate(morphs)))
