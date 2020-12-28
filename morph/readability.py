@@ -21,7 +21,7 @@ from PyQt5.QtGui import *
 from PyQt5.QtWidgets import *
 from PyQt5 import QtWebSockets,  QtNetwork
 
-from .morphemes import Morpheme, MorphDb, getMorphemes, altIncludesMorpheme
+from .morphemes import Morpheme, MorphDb, getMorphemes, altIncludesMorpheme, save_db_all_morphs, save_db_lines
 from .morphemizer import getAllMorphemizers
 from .preferences import get_preference as cfg, update_preferences
 from .util import mw
@@ -206,6 +206,7 @@ class CorpusDBUnpickler(pickle.Unpickler):
         cmodule = cmodule.replace('900801631.', curr_module_name)
         return pickle.Unpickler.find_class(self, cmodule, cname)
 
+
 class LocationCorpusDB:
     def __init__(self):
         self.version = 1.0
@@ -235,6 +236,22 @@ class LocationCorpusDB:
     def get_morph_from_id(self, mid):
         return self.id_to_morph[mid]
 
+    def save_db(self, path):
+        print(">>>>>>>>>>>>>>>>>>>>>>>>>>SAVING\n\n\n\n")
+        conn = sqlite3.connect(path)
+        with conn:
+            cur = conn.cursor()
+
+            save_db_all_morphs(cur, self.morph_to_id, 'morphs')
+
+            first = self.ordered_locs[0][1]
+            save_db_lines(cur, 0, first.line_data, do_create_table=True)
+            for (idx, locs) in enumerate(self.ordered_locs[1:]):
+                save_db_lines(cur, idx+1, locs[1].line_data)
+                            
+        conn.commit()
+        print("Saved LOCATIONS to sqlite dbname [%s]"%(path))
+
     def save(self, path):
         par = os.path.split(path)[0]
         if not os.path.exists(par):
@@ -245,8 +262,25 @@ class LocationCorpusDB:
                 }
         pickle.dump(data, f, -1)
         f.close()
+        self.save_db(path + ".sqlite")
+        # data has
+        if self.ordered_locs:
+            print(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>")
+            # loc is a filename
+            #
+            print("to dump ordered locs")
+            for loc, loc_corpus in self.ordered_locs:
+                print("Loc:",loc)
+                print("loc corpus:", loc_corpus)
+                print("loc corpus.morph_data:", loc_corpus.morph_data)
+                print("loc corpus.line_data:", loc_corpus.line_data)
+                print("===============================")
+                for a in loc_corpus.line_data:
+                    print(a)
+                print("------------------------")
 
     def load(self, path, save_lines=False):
+        print(">>>>>>>>>>>>>>>>>Loading")
         with gzip.open(path) as f:
             data = CorpusDBUnpickler(f).load()
             other_db = data['db']
