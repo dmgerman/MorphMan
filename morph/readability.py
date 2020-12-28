@@ -250,7 +250,8 @@ class LocationCorpusDB:
             
             if len(new_morphs) > 0:
 
-                # create a new dictionaries with only new morphs
+                # create new dictionaries with only new morphs
+                # we will merge this with the current ones
                 new_id_to_morph_dict = { k:v for k,v in zip(itertools.count(self.next_morph_id), new_morphs)  }
 
                 new_morph_to_id_dict = { value:key for (key,value) in new_id_to_morph_dict.items() }
@@ -261,7 +262,6 @@ class LocationCorpusDB:
                 self.next_morph_id = max(self.id_to_morph.keys()) + 1 if len(self.id_to_morph) > 0 else 0
 
                 # create a dictionary to map the db ids to the current ids
-                # first create a list of pairs, morph, to Id
                 db_id_to_overall_id = { new_morph_to_id_dict[morph]:
                                         self.morph_to_id[morph]
                                        for morph in db_id_to_morphs.values()}
