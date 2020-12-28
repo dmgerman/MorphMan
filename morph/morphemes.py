@@ -591,13 +591,14 @@ def save_db_files(cur, files):
 
     drop_table(cur, tname)
     create_table(cur, tname, fields,
-                 ", primary key(fileidx), unique(filename)"
+                 ", primary key(fileidx)"
                  )
 
     # the list of files is in order, add an integer identifier
-    tuples = map(lambda file:
+    tuples = list(map(lambda file:
                  (file[0], file[1][0], file[1][1]),
-                 enumerate(files))
+                 enumerate(files)))
+    print(tuples)
 
     cur.executemany("INSERT INTO %s (%s) VALUES(?,?,?);"%(tname,fields), tuples)
         
@@ -676,3 +677,29 @@ def save_db(path, morphs, locations):
         conn.commit()
 
     print("Saved to sqlite Tname [%s] dbname [%s]"%(tname, dbName))
+
+
+def read_db_all_morphs_as_dict(cur, tname):
+
+    def create_morph(m):
+        return Morpheme(m[0],m[1],m[2],m[3],m[4],m[5])
+
+    query = 'SELECT morphid, norm, base, inflected, read, pos, subpos FROM ' + tname
+    
+    return dict(map(lambda x: (x[0], create_morph(x[1:])), cur.execute(query)))
+    
+
+def read_db_all_lines_iter_per_file_ordered(cur):
+    query = 'SELECT fileidx, line, position, morphid from lines order by fileidx, line, position'
+    
+    return itertools.groupby(cur.execute(query),
+                             lambda x: x[0])
+
+
+def read_db_get_filename_by_index(cur, fileidx):
+    
+    query = 'SELECT filename from files where fileidx = %d'%fileidx
+    cur.execute(query)
+    result = cur.fetchone()
+    return None if result == None else result[0]
+

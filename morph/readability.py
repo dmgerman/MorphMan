@@ -22,7 +22,7 @@ from PyQt5.QtGui import *
 from PyQt5.QtWidgets import *
 from PyQt5 import QtWebSockets,  QtNetwork
 
-from .morphemes import Morpheme, MorphDb, getMorphemes, altIncludesMorpheme, save_db_all_morphs, save_db_lines, save_db_files
+from .morphemes import Morpheme, MorphDb, getMorphemes, altIncludesMorpheme, save_db_all_morphs, save_db_lines, save_db_files, read_db_all_morphs_as_dict, read_db_all_lines_iter_per_file_ordered, read_db_get_filename_by_index
 from .morphemizer import getAllMorphemizers
 from .preferences import get_preference as cfg, update_preferences
 from .util import mw
@@ -237,6 +237,78 @@ class LocationCorpusDB:
     def get_morph_from_id(self, mid):
         return self.id_to_morph[mid]
 
+    def load_db(self, path, save_lines=False):
+
+        conn = sqlite3.connect(path)
+        with conn:
+            cur = conn.cursor()
+            cur2 = conn.cursor()
+
+            db_id_to_morphs = read_db_all_morphs_as_dict(cur, 'morphs')
+            # find morphs not already seen
+            new_morphs = set(db_id_to_morphs.values()) - set(self.id_to_morph.values())
+            
+            if len(new_morphs) > 0:
+
+                # create a new dictionaries with only new morphs
+                new_id_to_morph_dict = { k:v for k,v in zip(itertools.count(self.next_morph_id), new_morphs)  }
+
+                new_morph_to_id_dict = { value:key for (key,value) in new_id_to_morph_dict.items() }
+
+                # update the overall dictionaries
+                self.morph_to_id = {**self.morph_to_id, **new_morph_to_id_dict}
+                self.id_to_morph = {**self.id_to_morph, **new_id_to_morph_dict}
+                self.next_morph_id = max(self.id_to_morph.keys()) + 1 if len(self.id_to_morph) > 0 else 0
+
+                # create a dictionary to map the db ids to the current ids
+                # first create a list of pairs, morph, to Id
+                db_id_to_overall_id = { new_morph_to_id_dict[morph]:
+                                        self.morph_to_id[morph]
+                                       for morph in db_id_to_morphs.values()}
+
+                had_new_morphs = True
+            else:
+                had_new_morphs = False
+                
+            # returns a list of iterators to each of the files
+            line_positions = read_db_all_lines_iter_per_file_ordered(cur)
+
+            def map_line(morphs_in_line):
+                # maps a list of [fileidx, line, mid] to array [mid]
+                # but the ids have to be remapped from database to overall (currently loaded)
+                return array.array('l', map(lambda x:
+                                            db_id_to_overall_id[x[2]] if had_new_morphs else x[2],
+                                            morphs_in_line))
+
+
+
+            for (fileidx, linesPerFile) in line_positions:
+                # We MUST use a different cursor since we are processing the positions as an iterator
+                filename = read_db_get_filename_by_index(cur2, fileidx)
+
+                print("creating data for file: ", filename)
+
+                new_loc = (filename, os.path.basename(path))
+
+                loc_corpus = self.get_or_create_corpus(new_loc, True)
+
+                lines = list(map(lambda x: x[1:], linesPerFile))
+
+                lines_iterators = itertools.groupby(lines, lambda x: x[0])
+
+                loc_corpus.line_data = list(map(map_line,
+                                           [list(v) for k,v in lines_iterators]))
+                print(loc_corpus.line_data)
+
+
+            # assert the data
+            #for line in loc_corpus.line_data:
+            #    for m in line:
+            #        print ("m->",m, self.id_to_morph[m])
+
+            print("Finished loading")
+
+                            
     def save_db(self, path):
         conn = sqlite3.connect(path)
         with conn:
@@ -275,6 +347,9 @@ class LocationCorpusDB:
 
     def load(self, path, save_lines=False):
         print(">>>>>>>>>>>>>>>>>Loading")
+        self.load_db(path + ".sqlite", save_lines)
+        return 
+    
         with gzip.open(path) as f:
             data = CorpusDBUnpickler(f).load()
             other_db = data['db']
