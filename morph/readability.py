@@ -251,7 +251,7 @@ class LocationCorpusDB:
 
             # save the lines
 
-            # the first needs to create the database, the rest do not
+            # the first needs to create the table, the rest do not
             # there must be at least one, I presume
             first = self.ordered_locs[0]
             save_db_lines(cur, 0, first[1].line_data, do_create_table=True)
