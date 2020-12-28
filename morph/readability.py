@@ -248,19 +248,20 @@ class LocationCorpusDB:
             # find morphs not already seen
             new_morphs = set(db_id_to_morphs.values()) - set(self.id_to_morph.values())
             
+            if len(new_morphs) > 0:
 
-            # create new dictionaries with only new morphs
-            # we will merge this with the current ones
-            new_id_to_morph_dict = { k:v for k,v in zip(itertools.count(self.next_morph_id), new_morphs)  }
+                # create new dictionaries with only new morphs
+                # we will merge this with the current ones
+                new_id_to_morph_dict = { k:v for k,v in zip(itertools.count(self.next_morph_id), new_morphs)  }
             
-            new_morph_to_id_dict = { value:key for (key,value) in new_id_to_morph_dict.items() }
+                new_morph_to_id_dict = { value:key for (key,value) in new_id_to_morph_dict.items() }
             
-            # update the overall dictionaries
-            self.morph_to_id = {**self.morph_to_id, **new_morph_to_id_dict}
-            self.id_to_morph = {**self.id_to_morph, **new_id_to_morph_dict}
-            self.next_morph_id = max(self.id_to_morph.keys()) + 1 if len(self.id_to_morph) > 0 else 0
+                # update the overall dictionaries
+                self.morph_to_id = {**self.morph_to_id, **new_morph_to_id_dict}
+                self.id_to_morph = {**self.id_to_morph, **new_id_to_morph_dict}
+                self.next_morph_id = max(self.id_to_morph.keys()) + 1 if len(self.id_to_morph) > 0 else 0
             
-                # create a dictionary to map the db ids to the current ids
+            # create a dictionary to map the db ids to the current ids
             db_id_to_overall_id = { id:self.morph_to_id[morph]
                                     for id, morph in db_id_to_morphs.items()}
                 
