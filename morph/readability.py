@@ -15,6 +15,7 @@ import re
 import sqlite3
 from collections import namedtuple
 from contextlib import redirect_stdout, redirect_stderr
+import itertools
 
 from PyQt5.QtCore import *
 from PyQt5.QtGui import *
@@ -251,11 +252,12 @@ class LocationCorpusDB:
             # save the lines
 
             # the first needs to create the database, the rest do not
+            # there must be at least one, I presume
             first = self.ordered_locs[0]
             save_db_lines(cur, 0, first[1].line_data, do_create_table=True)
             
-            for (idx, locs) in enumerate(self.ordered_locs[1:]):
-                save_db_lines(cur, idx+1, locs[1].line_data)
+            for (idx, locs) in zip(itertools.count(1), self.ordered_locs[1:]):
+                save_db_lines(cur, idx, locs[1].line_data)
                             
         conn.commit()
 

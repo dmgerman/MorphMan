@@ -560,25 +560,18 @@ def save_db_locations(cur, locations, morph_to_id, tname='locations'):
     create_table(cur, tname, fields,
                  ", primary key (morphid, noteid, field), foreign key (morphid) references morphs")
 
-    # we need to know the morphid of each morph
-    # so we can properly reference them in the table locations
-    # (see foreign key constraint in the table create above)
-    # in theory we have this info, but this mades the code
-    # simpler and less error prone and it the time penalty
-    # seems to be minimal
-    
-
     # we need to convert the db of morphs into a list of tuples
-    # where the first value is the morphid (stored in the table
-    # we just created)
+    # where the first value is the morphid
     
-    # a morph might have multiple locations
-    # map each morph in db into a list [morphidlist, location info]
+    # each location is a pair: morph, list of locations
+    # map each location into a list tuples (morphid, location info)
     locationsLists =map(lambda x: # this is a pair of morph and list of locations
-                        list(map(lambda y: (morph_to_id[x[0]],) +transcode_location(y),x[1])),
+                        list(map(lambda y: (morph_to_id[x[0]],) +transcode_location(y),
+                                 x[1])
+                             ),
                         locations)
 
-    # flatten the list... because we have a list of lists (one list per morph)
+    # flatten the list... because we have a list of tuples (one list per morph)
     tuples = [val for sublist in locationsLists for val in sublist]
 
     cur.executemany("INSERT INTO %s (%s) VALUES(?,?,?,?,?,?,?);"%(tname,fields), tuples)
@@ -600,7 +593,6 @@ def save_db_files(cur, files):
     create_table(cur, tname, fields,
                  ", primary key(fileidx), unique(filename)"
                  )
-#                     ", primary key (morphid, noteid, field), foreign key (morphid) references morphs")
 
     # the list of files is in order, add an integer identifier
     tuples = map(lambda file:
@@ -633,8 +625,8 @@ def save_db_lines(cur, fileidx, lines, do_create_table= False):
         return result
         
     linesLists = map(lambda line:
-                    convert_each_line(line[0]+1, list(line[1])),
-                    enumerate(lines))
+                    convert_each_line(line[0], list(line[1])),
+                     zip(itertools.count(1), lines))
 
     # flatten the list... because we have a list of lists (one list per morph)
     tuples = [val for sublist in linesLists for val in sublist]
