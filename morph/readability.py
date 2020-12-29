@@ -259,7 +259,7 @@ class LocationCorpusDB:
                 # update the overall dictionaries
                 self.morph_to_id = {**self.morph_to_id, **new_morph_to_id_dict}
                 self.id_to_morph = {**self.id_to_morph, **new_id_to_morph_dict}
-                self.next_morph_id = max(self.id_to_morph.keys()) + 1 if len(self.id_to_morph) > 0 else 0
+                self.next_morph_id = max(self.id_to_morph.keys()) + 1
             
             # create a dictionary to map the db ids to the current ids
             db_id_to_overall_id = { id:self.morph_to_id[morph]
