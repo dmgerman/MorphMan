@@ -634,8 +634,25 @@ def save_db_lines(cur, fileidx, lines, do_create_table= False):
 
     cur.executemany("INSERT INTO %s (%s) VALUES(?,?,?,?);"%(tname,fields), tuples)
         
+def save_db_morph_counts(cur, fileidx, counts, do_create_table= False):
 
+    tname = 'morph_counts'
+    # fields for the table
+    fields = "fileidx, morphid, nmorphs"
 
+    # it is usually faster to drop the table than delete/update the tuples
+    # in it
+    if do_create_table:
+        drop_table(cur, tname)
+        create_table(cur, tname, fields,
+                     ", foreign key (fileidx) references files")
+
+    # convert to a list of tuples, adding the file index
+
+    tuples = map(lambda count: (fileidx, count[0], count[1]), counts.items())
+
+    cur.executemany("INSERT INTO %s (%s) VALUES(?,?,?);"%(tname,fields), tuples)
+        
 
 def save_db(path, morphs, locations):
     # assume that the directory is already created...
@@ -689,6 +706,15 @@ def read_db_all_morphs_as_dict(cur, tname):
     return dict(map(lambda x: (x[0], create_morph(x[1:])), cur.execute(query)))
     
 
+def read_db_all_morph_counts_iter_per_file_ordered(cur):
+    query ='''
+    SELECT fileidx, morphid, nmorphs from morph_counts
+              order by fileidx
+'''    
+    return itertools.groupby(cur.execute(query),
+                             lambda x: x[0])
+
+
 def read_db_all_lines_iter_per_file_ordered(cur):
     query = 'SELECT fileidx, line, position, morphid from lines order by fileidx, line, position'
     
@@ -703,3 +729,11 @@ def read_db_get_filename_by_index(cur, fileidx):
     result = cur.fetchone()
     return None if result == None else result[0]
 
+def read_db_table_exists(cur, tname):
+    query = "SELECT name FROM sqlite_master WHERE type='table' AND name=?"
+    cur.execute(query, (tname,))
+    result = cur.fetchall()
+    return len(result) > 0
+
+def read_db_has_locations_table(cur):
+    return read_db_table_exists(cur, 'lines')

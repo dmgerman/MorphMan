@@ -22,7 +22,7 @@ from PyQt5.QtGui import *
 from PyQt5.QtWidgets import *
 from PyQt5 import QtWebSockets,  QtNetwork
 
-from .morphemes import Morpheme, MorphDb, getMorphemes, altIncludesMorpheme, save_db_all_morphs, save_db_lines, save_db_files, read_db_all_morphs_as_dict, read_db_all_lines_iter_per_file_ordered, read_db_get_filename_by_index
+from .morphemes import Morpheme, MorphDb, getMorphemes, altIncludesMorpheme, save_db_all_morphs, save_db_lines, save_db_files, read_db_all_morphs_as_dict, read_db_all_lines_iter_per_file_ordered, read_db_get_filename_by_index, save_db_morph_counts, read_db_has_locations_table, read_db_all_morph_counts_iter_per_file_ordered
 from .morphemizer import getAllMorphemizers
 from .preferences import get_preference as cfg, update_preferences
 from .util import mw
@@ -57,9 +57,12 @@ def kaner(to_translate, hiraganer = False):
 def adjustReading(reading):
     return kaner(reading)
 
-PROFILE_PARSING = False
+PROFILE_PARSING = True
 if PROFILE_PARSING:
     import cProfile
+    import pstats
+    from pstats import SortKey
+    
 
 def atoi(text):
     return int(text) if text.isdigit() else text
@@ -237,12 +240,71 @@ class LocationCorpusDB:
     def get_morph_from_id(self, mid):
         return self.id_to_morph[mid]
 
+    def load_db_line_positions(conn, db_id_to_overall_id):
+        cur = conn.cursor()
+        cur2 = conn.cursor() # we read with iterators, so we need a second cursor
+
+        # returns a list of iterators to each of the files
+        line_positions = read_db_all_lines_iter_per_file_ordered(cur)
+        
+        def map_line(morphs_in_line):
+            # maps a list of [fileidx, line, mid] to array [mid]
+            # but the ids have to be remapped from database to overall (currently loaded)
+            return array.array('l', map(lambda x:
+                                        db_id_to_overall_id[x[2]],
+                                        morphs_in_line))
+
+
+        for (fileidx, linesPerFile) in line_positions:
+            # We MUST use a different cursor since we are processing the positions as an iterator
+            filename = read_db_get_filename_by_index(cur2, fileidx)
+            
+            print("creating data for file: ", filename)
+            
+            new_loc = (filename, os.path.basename(filename))
+            
+            loc_corpus = self.get_or_create_corpus(new_loc, True)
+            
+            lines = list(map(lambda x: x[1:], linesPerFile))
+            
+            lines_iterators = itertools.groupby(lines, lambda x: x[0])
+            
+            loc_corpus.line_data = dict(map(map_line,
+                                            [list(v) for k,v in lines_iterators]))
+            print(loc_corpus.line_data)
+
+    def load_db_morph_counts(self, conn, db_id_to_overall_id):
+        cur = conn.cursor()
+        cur2 = conn.cursor() # we read with iterators, so we need a second cursor
+
+        # returns a list of iterators to each of the files
+        morph_counts = read_db_all_morph_counts_iter_per_file_ordered(cur)
+
+        for (fileidx, countsPerFile) in morph_counts:
+            # We MUST use a different cursor since we are processing the positions as an iterator
+            filename = read_db_get_filename_by_index(cur2, fileidx)
+            
+            print("creating data for file: ", filename)
+            
+            new_loc = (filename, os.path.basename(filename))
+            
+            loc_corpus = self.get_or_create_corpus(new_loc, False)
+            
+            # the first field is the filename, then the morphid, count
+            
+            loc_corpus.morph_data = dict(map(lambda x: (x[1],x[2]), countsPerFile))
+
+            print(loc_corpus.morph_data)
+
+
+
     def load_db(self, path, save_lines=False):
 
         conn = sqlite3.connect(path)
+
+        print("Loading db")
         with conn:
             cur = conn.cursor()
-            cur2 = conn.cursor()
 
             db_id_to_morphs = read_db_all_morphs_as_dict(cur, 'morphs')
             # find morphs not already seen
@@ -251,7 +313,7 @@ class LocationCorpusDB:
             if len(new_morphs) > 0:
 
                 # create new dictionaries with only new morphs
-                # we will merge this with the current ones
+                # we will merge these with the current ones
                 new_id_to_morph_dict = { k:v for k,v in zip(itertools.count(self.next_morph_id), new_morphs)  }
             
                 new_morph_to_id_dict = { value:key for (key,value) in new_id_to_morph_dict.items() }
@@ -260,41 +322,17 @@ class LocationCorpusDB:
                 self.morph_to_id = {**self.morph_to_id, **new_morph_to_id_dict}
                 self.id_to_morph = {**self.id_to_morph, **new_id_to_morph_dict}
                 self.next_morph_id = max(self.id_to_morph.keys()) + 1
-            
+
             # create a dictionary to map the db ids to the current ids
             db_id_to_overall_id = { id:self.morph_to_id[morph]
                                     for id, morph in db_id_to_morphs.items()}
                 
-            # returns a list of iterators to each of the files
-            line_positions = read_db_all_lines_iter_per_file_ordered(cur)
-
-            def map_line(morphs_in_line):
-                # maps a list of [fileidx, line, mid] to array [mid]
-                # but the ids have to be remapped from database to overall (currently loaded)
-                return array.array('l', map(lambda x:
-                                            db_id_to_overall_id[x[2]],
-                                            morphs_in_line))
-
-
-
-            for (fileidx, linesPerFile) in line_positions:
-                # We MUST use a different cursor since we are processing the positions as an iterator
-                filename = read_db_get_filename_by_index(cur2, fileidx)
-
-                print("creating data for file: ", filename)
-
-                new_loc = (filename, os.path.basename(path))
-
-                loc_corpus = self.get_or_create_corpus(new_loc, True)
-
-                lines = list(map(lambda x: x[1:], linesPerFile))
-
-                lines_iterators = itertools.groupby(lines, lambda x: x[0])
-
-                loc_corpus.line_data = list(map(map_line,
-                                           [list(v) for k,v in lines_iterators]))
-                print(loc_corpus.line_data)
-
+            if read_db_has_locations_table(cur):
+                print("reading locations...")
+                self.load_db_line_positions(conn, db_id_to_overall_id)
+            else:
+                print("reading counts...")
+                self.load_db_morph_counts(conn, db_id_to_overall_id)
 
             # assert the data
             #for line in loc_corpus.line_data:
@@ -316,15 +354,29 @@ class LocationCorpusDB:
             files = map(lambda x: x[0], self.ordered_locs)
             save_db_files(cur, files)
 
-            # save the lines
 
-            # the first needs to create the table, the rest do not
-            # there must be at least one, I presume
-            first = self.ordered_locs[0]
-            save_db_lines(cur, 0, first[1].line_data, do_create_table=True)
+            assert len(self.ordered_locs) > 0, "There must be at least one file to save"
+
+            (first_loc, first_loc_corpus) = self.ordered_locs[0]
+
+            # save the lines
+            if first_loc_corpus.has_line_data:
+                # the first needs to create the table, the rest do not
+                save_db_lines(cur, 0, first_loc_corpus.line_data, do_create_table=True)
             
-            for (idx, locs) in zip(itertools.count(1), self.ordered_locs[1:]):
-                save_db_lines(cur, idx, locs[1].line_data)
+                for (idx, locs) in zip(itertools.count(1), self.ordered_locs[1:]):
+                    save_db_lines(cur, idx, locs[1].line_data)
+            else:
+                # the first needs to create the table, the rest do not
+                save_db_morph_counts(cur, 0, first_loc_corpus.morph_data, do_create_table=True)
+            
+                for (idx, locs) in zip(itertools.count(1), self.ordered_locs[1:]):
+                    save_db_morph_counts(cur, idx, locs[1].morph_data)
+
+                # morph_data is a list of 
+#                    for mid, count in loc_corpus.morph_data.items():
+#                        new_corpus.add_morph(other_db.get_morph_from_id(mid), count)
+
                             
         conn.commit()
 
@@ -1108,11 +1160,14 @@ class AnalyzerDialog(QDialog):
 
                 locs_before_load = len(corpus_db.ordered_locs)
 
-                is_corpusdb = os.path.splitext(file_basename)[1].lower() == '.corpusdb'
+                print("Processing [%s]"%file_basename)
+                is_corpusdb = os.path.splitext(file_basename)[1].lower() == '.sqlite'
 
                 if is_corpusdb:
-                    corpus_db.load(file_path, process_lines)
+                    print("a db")
+                    corpus_db.load_db(file_path, process_lines)
                 else:
+                    print("not a database")
                     is_ass = os.path.splitext(file_basename)[1].lower() == '.ass'
                     is_srt = os.path.splitext(file_basename)[1].lower() == '.srt'
 
@@ -1129,7 +1184,7 @@ class AnalyzerDialog(QDialog):
                 raise
 
         def accepted_filetype(filename):
-            return filename.lower().endswith(('.srt', '.ass', '.txt', '.corpusdb'))
+            return filename.lower().endswith(('.srt', '.ass', '.txt', '.sqlite'))
 
         list_of_files = list()
         for (dirpath, _, filenames) in os.walk(input_path):
@@ -1192,7 +1247,13 @@ class AnalyzerDialog(QDialog):
 
             if PROFILE_PARSING:
                 pr.disable()
-                pr.dump_stats('c:/dev/exec.cprofile')
+                s = io.StringIO()
+                sortby = SortKey.CUMULATIVE
+                ps = pstats.Stats(pr, stream=s).sort_stats(sortby)
+                ps.print_stats()
+                print(s.getvalue())
+                
+                pr.dump_stats('/tmp/exec.cprofile')
         else:
             self.writeOutput('\nNo files found to process.\n')
             return
