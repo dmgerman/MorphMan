@@ -200,6 +200,11 @@ class Location(ABC):
     def show(self):
         pass
 
+    # identifies the class, rather than depend on name __class__
+    @abstractmethod 
+    def name(self):
+        pass
+
 
 class Nowhere(Location):
     def __init__(self, tag, weight=0):
@@ -209,6 +214,8 @@ class Nowhere(Location):
     def show(self):
         return '%s@%d' % (self.tag, self.maturity)
 
+    def name(self):
+        assert False, "Corpus locations not implemented yet"
 
 class Corpus(Location):
     """A corpus we want to use for priority, without storing more than morpheme frequencies."""
@@ -220,6 +227,8 @@ class Corpus(Location):
     def show(self):
         return '%s*%s@%d' % (self.name, self.weight, self.maturity)
 
+    def name(self):
+        assert False, "Corpus locations not implemented yet"
 
 class TextFile(Location):
     def __init__(self, filePath, lineNo, maturity, weight=1):
@@ -231,6 +240,8 @@ class TextFile(Location):
     def show(self):
         return '%s:%d@%d' % (self.filePath, self.lineNo, self.maturity)
 
+    def name(self):
+        return "text-file"
 
 class AnkiDeck(Location):
     """ This maps to/contains information for one note and one relevant field like u'Expression'. """
@@ -248,6 +259,9 @@ class AnkiDeck(Location):
 
     def show(self):
         return '%d[%s]@%d' % (self.noteId, self.fieldName, self.maturity)
+
+    def name(self):
+        return "anki-deck"
 
 
 def altIncludesMorpheme(m, alt):
@@ -310,6 +324,7 @@ class MorphDb:
         return ms2str(sorted(self.db.items(), key=lambda it: it[0].show()))
 
     def save(self, path):  # FilePath -> IO ()
+        print("\n\nSaving ", path)
         par = os.path.split(path)[0]
         if not os.path.exists(par):
             os.makedirs(par)
@@ -320,8 +335,8 @@ class MorphDb:
                 }
         pickle.dump(data, f, -1)
         f.close()
-        if cfg('saveSQLite'):
-            save_db(path, self.db.keys(), self.db.items() )
+#        if cfg('saveSQLite'):
+        save_db(path, self.db.keys(), self.db.items() )
 
     def load(self, path):  # FilePath -> m ()
         f = gzip.open(path)
@@ -502,18 +517,10 @@ def create_table(cur, name, fields, extra = ""):
 def transcode_morph(item):
     return (item.norm, item.base, item.inflected, item.read, item.pos, item.subPos)
 
-def transcode_location(loc):
-    return (loc.noteId, loc.fieldName, loc.fieldValue, loc.maturity, loc.guid, loc.weight)
     
-def save_db_all_morphs(cur, morph_to_id, tname):
+def save_db_all_morphs(cur, morph_to_id, tname='morphs'):
 
-    # morph_to_id a dictionary of morphs to id
-
-    # we cannot use the name 'all' for a table
-    # since it is a reserved word in sql
-    if tname == 'all':
-        # used 'morphs' instead
-        tname = 'morphs'
+    # morph_to_id is a dictionary of morphs to id
 
     # fields  of table to be created
     fields = "morphid, norm, base, inflected, read, pos, subpos"
@@ -544,7 +551,36 @@ def read_db_all_morphs(cur):
     forDict = map(lambda x: (x[1:], x[0]), rows)
     return dict(forDict)
 
-def save_db_locations(cur, locations, morph_to_id, tname='locations'):
+def morph_locations_to_tuples(morphWithLocations, morph_to_id, f_transcode, loc_name):
+    # morphWithLocations is a pair of morph and locations
+    # we need to return a list of tuples (morphid, location info...)
+    morph, locs = morphWithLocations
+    return list(map(lambda y: (morph_to_id[morph],) +f_transcode(y),
+                    filter(lambda x: x.name()== loc_name ,locs)))
+
+def convert_locations_to_tuples(locations, morph_to_id, f_transcode, tag):
+
+    # we need to convert the db of morphs into a list of tuples
+    # where the first value is the morphid
+
+    # but only if the location has certain tag
+    
+    # each location is a pair: morph, list of locations
+
+    # f_transcode is the function to convert the attributes of the location
+    # to a tuple. the morphid is spliced first into this tuple
+
+    
+    locationsLists =map(lambda x: # x is a pair of morph and list of locations
+                        morph_locations_to_tuples(x, morph_to_id, f_transcode, tag),
+                        locations)
+
+    # flatten the list... because we have a list of tuples (one list per morph)
+    # note that this list might be empty
+    return [val for sublist in locationsLists for val in sublist]
+
+
+def save_db_anki_locations(cur, locations, morph_to_id, tname='ankilocs'):
     # save a morphman db as a table in database
     #
     # morph_to_id is a dictionary that maps a morph class to its integer
@@ -553,6 +589,10 @@ def save_db_locations(cur, locations, morph_to_id, tname='locations'):
     # fields for the table
     fields = "morphid, noteid, field, fieldvalue, maturity, guid, weight"
 
+    # convert to a db tuple
+    def transcode_anki_location(loc):
+        return (loc.noteId, loc.fieldName, loc.fieldValue, loc.maturity, loc.guid, loc.weight)
+
     # it is usually faster to drop the table than delete/update the tuples
     # in it
 
@@ -560,21 +600,52 @@ def save_db_locations(cur, locations, morph_to_id, tname='locations'):
     create_table(cur, tname, fields,
                  ", primary key (morphid, noteid, field), foreign key (morphid) references morphs")
 
-    # we need to convert the db of morphs into a list of tuples
-    # where the first value is the morphid
+    tuples = convert_locations_to_tuples(locations,
+                                         morph_to_id,
+                                         transcode_anki_location,
+                                         'anki-deck')
+
+    if len(tuples) > 0:
+        cur.executemany("INSERT INTO %s (%s) VALUES(?,?,?,?,?,?,?);"%(tname,fields), tuples)
+
+
+def save_db_file_locations(cur, locations, morph_to_id, tname='filelocs'):
+
+    # fields for the table
+    fields = "morphid, filename, line, maturity"
+
+    # it is usually faster to drop the table than delete/update the tuples
+    # in it
+
+    drop_table(cur, tname)
+    create_table(cur, tname, fields,
+                 ", foreign key (morphid) references morphs")
+
+    # convert to a db tuple
+    def transcode_text_file_location(loc):
+        return (loc.filePath, loc.lineNo, loc.maturity)
+
+    tuples = convert_locations_to_tuples(locations,
+                                         morph_to_id,
+                                         transcode_text_file_location,
+                                         'text-file')
+
+
+    if len(tuples) > 0:
+        cur.executemany("INSERT INTO %s (%s) VALUES(?,?,?,?);"%(tname,fields), tuples)
     
-    # each location is a pair: morph, list of locations
-    # map each location into a list tuples (morphid, location info)
-    locationsLists =map(lambda x: # this is a pair of morph and list of locations
-                        list(map(lambda y: (morph_to_id[x[0]],) +transcode_location(y),
-                                 x[1])
-                             ),
-                        locations)
+def save_db_locations(cur, locations, morph_to_id):
 
-    # flatten the list... because we have a list of tuples (one list per morph)
-    tuples = [val for sublist in locationsLists for val in sublist]
+    # unfortunately, a morph might include different types of locations
+    # so we need to scan each type once
+    # functions below only save their corresponding type
 
-    cur.executemany("INSERT INTO %s (%s) VALUES(?,?,?,?,?,?,?);"%(tname,fields), tuples)
+    save_db_anki_locations(cur, locations, morph_to_id)
+
+    save_db_file_locations(cur, locations, morph_to_id)
+
+
+
         
 def save_db_files(cur, files):
     tname = 'files'
@@ -663,14 +734,8 @@ def save_db(path, morphs, locations):
     #
     # database with each "file" as a table
     # so let use the basefilename of the relation as
-    tname = os.path.basename(path)
-    dirName = os.path.dirname(path)
-    # it ends with .db so cut it
-    assert (len(tname)> 3 and tname[-3:] == '.db'), "extension is no longer .db?"
 
-    # name of the morphs to save (all, known, etc.)
-    tname = tname[:-3]
-    dbName = dirName + '/morphman.sqlite'
+    dbName = path + ".sqlite"
 
     conn = connect_db(dbName)
     with conn:
@@ -678,23 +743,33 @@ def save_db(path, morphs, locations):
         # it looks like we only need to save the "all" data
         # the others seem to be subsets of it (based on the
         # maturity field)
-        if (tname == 'all'):
 
-            # add an unique int to identify the morph in the database
-            # assumes that all morphs are unique
-            # create a dictionary to add this 'key' to the locations
+        # add an unique int to identify the morph in the database
+        # assumes that all morphs are unique
+        # create a dictionary to add this 'key' to the locations
 
-            morph_to_id = dict(zip(morphs, itertools.count()))
+        morph_to_id = dict(zip(morphs, itertools.count()))
+           
+        save_db_all_morphs(cur, morph_to_id)
+        # then we need to save the locations
+        # every morph in location is guaranteed in db at this point
             
-            save_db_all_morphs(cur, morph_to_id, tname)
-            # then we need to save the locations
-            # every morph in location is guaranteed in db at this point
-            
-            save_db_locations(cur, locations, morph_to_id)
+        save_db_locations(cur, locations, morph_to_id)
         conn.commit()
 
-    print("Saved to sqlite Tname [%s] dbname [%s]"%(tname, dbName))
+    print("Saved to sqlite dbname [%s]"%(dbName))
 
+def read_db_anki_locations(cur, mid_to_morph_dict, tname='ankilocs'):
+    # read the locations and return a dictionary that maps the
+    # morph (object) to the location
+    fields = "morphid, noteid, field, fieldvalue, maturity, guid, weight"
+    query = '''
+select %s from %s
+'''%(fields, tname)
+    
+    return dict(map(lambda x: (mid_to_morph_dict[x],
+                               AnkiDeck(x[1:])),
+                    cur.execute(query)))
 
 def read_db_all_morphs_as_dict(cur, tname):
 
@@ -704,6 +779,33 @@ def read_db_all_morphs_as_dict(cur, tname):
     query = 'SELECT morphid, norm, base, inflected, read, pos, subpos FROM ' + tname
     
     return dict(map(lambda x: (x[0], create_morph(x[1:])), cur.execute(query)))
+
+def load_db(path):
+
+    # returns (morphs, locations)
+    # it ends with .db so cut it
+    assert path.endswith('.sqlite'), "extension is no longer .db?"
+
+    # name of the morphs to save (all, known, etc.)
+
+    conn = connect_db(pathName)
+    with conn:
+        cur = conn.cursor()
+
+        # we need to load
+        #    all
+        #
+        # and split them into
+        #    known
+        #    mature
+        mid_to_morph_dict = read_db_all_morphs_as_dict(cur, 'morphs')
+            
+        # read a list of all the locations
+        # returns a dictionary: morph object -> location object
+
+        locs_morph_to_id = read_db_anki_locations(cur, mid_to_morph_dict)
+
+    return locs_morph_to_id
     
 
 def read_db_all_morph_counts_iter_per_file_ordered(cur):
