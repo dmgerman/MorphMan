@@ -338,7 +338,35 @@ class MorphDb:
 #        if cfg('saveSQLite'):
         save_db(path, self.db.keys(), self.db.items() )
 
+    def print_db(self):
+        print("morphs and locations")
+        for (m, locs) in self.db.items():
+            print(m)
+            print(locs)
+        print("groups")
+        for (g, morphs) in self.groups.items():
+            print(g)
+            print(morphs)
+
     def load(self, path):  # FilePath -> m ()
+        print("Loading database", path)
+        if (True):
+            
+            (morphs, self.db) = load_db(path)
+            print("after Loading database", path)
+
+            # now we need to do the GroupKey
+            # TODO rewrite without mutation
+            for m in morphs:
+                gk = m.getGroupKey()
+                if gk not in self.groups:
+                    self.groups[gk] = {m}
+                else:
+                    self.groups[gk].add(m)
+
+            self.print_db()
+            return
+
         f = gzip.open(path)
         try:
             data = MorphDBUnpickler(f).load()
@@ -581,13 +609,14 @@ def convert_locations_to_tuples(locations, morph_to_id, f_transcode, tag):
 
 
 def save_db_anki_locations(cur, locations, morph_to_id, tname='ankilocs'):
-    # save a morphman db as a table in database
+    #
+    # save the locations of type anki-deck to given table
     #
     # morph_to_id is a dictionary that maps a morph class to its integer
     # as stored in the database
     #
     # fields for the table
-    fields = "morphid, noteid, field, fieldvalue, maturity, guid, weight"
+    fields = "morphid, noteid, field, fieldvalue, guid, maturity, weight"
 
     # convert to a db tuple
     def transcode_anki_location(loc):
@@ -609,7 +638,13 @@ def save_db_anki_locations(cur, locations, morph_to_id, tname='ankilocs'):
         cur.executemany("INSERT INTO %s (%s) VALUES(?,?,?,?,?,?,?);"%(tname,fields), tuples)
 
 
-def save_db_file_locations(cur, locations, morph_to_id, tname='filelocs'):
+def save_db_text_file_locations(cur, locations, morph_to_id, tname='filelocs'):
+    #
+    # save the locations of type text-file to given table
+    #
+    # morph_to_id is a dictionary that maps a morph class to its integer
+    # as stored in the database
+
 
     # fields for the table
     fields = "morphid, filename, line, maturity"
@@ -642,7 +677,7 @@ def save_db_locations(cur, locations, morph_to_id):
 
     save_db_anki_locations(cur, locations, morph_to_id)
 
-    save_db_file_locations(cur, locations, morph_to_id)
+    save_db_text_file_locations(cur, locations, morph_to_id)
 
 
 
@@ -725,6 +760,7 @@ def save_db_morph_counts(cur, fileidx, counts, do_create_table= False):
     cur.executemany("INSERT INTO %s (%s) VALUES(?,?,?);"%(tname,fields), tuples)
         
 
+
 def save_db(path, morphs, locations):
     # assume that the directory is already created...
     # exceptions will handle the errors
@@ -759,17 +795,70 @@ def save_db(path, morphs, locations):
 
     print("Saved to sqlite dbname [%s]"%(dbName))
 
+def convert_tuples_to_morph_locations(cur, query, tuples_to_morph_locations):
+    # the query results has to be grouped by because we must need to have a set
+    # locations for each morph
+    iter_per_morph_loc = itertools.groupby(cur.execute(query), lambda x: x[0])
+
+    morphs_with_loc = dict(map(tuples_to_morph_locations,
+                      [list(v) for k,v in iter_per_morph_loc]))
+
+    return morphs_with_loc
+            
+
 def read_db_anki_locations(cur, mid_to_morph_dict, tname='ankilocs'):
     # read the locations and return a dictionary that maps the
     # morph (object) to the location
-    fields = "morphid, noteid, field, fieldvalue, maturity, guid, weight"
+    fields = "morphid, noteid, field, fieldvalue, guid, maturity, weight"
     query = '''
 select %s from %s
+order by morphid, noteid, field
 '''%(fields, tname)
-    
-    return dict(map(lambda x: (mid_to_morph_dict[x],
-                               AnkiDeck(x[1:])),
-                    cur.execute(query)))
+
+    def tuples_to_morph_locations(tuples):
+        # tuples is an iterator
+        tuples = list(tuples)
+        assert len(tuples)>0, "There should be at least one tuple here"
+        mid = tuples[0][0]
+        # check the values
+        for t in tuples:
+            assert t[0] == mid, "mid in list of tuples should match"
+        print("------------------------------------")
+        print(tuples)
+        # create set of locations
+        locs = set(map(lambda x: AnkiDeck(x[1],x[2],x[3],x[4],x[5],x[6]), tuples))
+        print("done with tuples")
+        return (mid_to_morph_dict[mid], locs)
+
+    return convert_tuples_to_morph_locations(cur, query, tuples_to_morph_locations)
+
+
+def read_db_text_file_locations(cur, mid_to_morph_dict, tname='filelocs'):
+    # read the locations and return a dictionary that maps the
+    # morph (object) to the location
+    fields = "morphid, filename, line, maturity"
+                
+    query = '''
+select %s from %s order by morphid, filename, line
+'''%(fields, tname)
+
+    def tuples_to_morph_locations(tuples):
+        # tuples is an iterator
+        tuples = list(tuples)
+        assert len(tuples)>0, "There should be at least one tuple here"
+        mid = tuples[0][0]
+        # check the values
+        for t in tuples:
+            assert t[0] == mid, "mid in list of tuples should match"
+        print("------------------------------------")
+        print(tuples)
+        # create set of locations
+        locs = set(map(lambda x: TextFile(x[1],x[2],x[3]), tuples))
+        print("done with tuples")
+        return (mid_to_morph_dict[mid], locs)
+
+    return convert_tuples_to_morph_locations(cur, query, tuples_to_morph_locations)
+
 
 def read_db_all_morphs_as_dict(cur, tname):
 
@@ -780,6 +869,11 @@ def read_db_all_morphs_as_dict(cur, tname):
     
     return dict(map(lambda x: (x[0], create_morph(x[1:])), cur.execute(query)))
 
+def merge_locs_dict(a, b):
+    emptySet = set()
+    return dict([ (x, a.get(x, emptySet).union(b.get(x, emptySet)))
+                  for x in set(a.keys()) | set(b.keys()) ])
+
 def load_db(path):
 
     # returns (morphs, locations)
@@ -788,7 +882,9 @@ def load_db(path):
 
     # name of the morphs to save (all, known, etc.)
 
-    conn = connect_db(pathName)
+    print("reading from db", path)
+
+    conn = connect_db(path)
     with conn:
         cur = conn.cursor()
 
@@ -798,15 +894,26 @@ def load_db(path):
         # and split them into
         #    known
         #    mature
+        print("reading morphs")
         mid_to_morph_dict = read_db_all_morphs_as_dict(cur, 'morphs')
             
+        print("reading morphs done")
+
         # read a list of all the locations
         # returns a dictionary: morph object -> location object
 
-        locs_morph_to_id = read_db_anki_locations(cur, mid_to_morph_dict)
+        anki_locs_dict = read_db_anki_locations(cur, mid_to_morph_dict)
+        print("reading anki locs done")
 
-    return locs_morph_to_id
-    
+        text_file_locs_dict = read_db_text_file_locations(cur, mid_to_morph_dict)
+        print("reading text locs done")
+
+        merged = merge_locs_dict(anki_locs_dict, text_file_locs_dict)
+        print("merged locs")
+
+
+    return(mid_to_morph_dict.values(), merged)
+
 
 def read_db_all_morph_counts_iter_per_file_ordered(cur):
     query ='''
@@ -839,3 +946,4 @@ def read_db_table_exists(cur, tname):
 
 def read_db_has_locations_table(cur):
     return read_db_table_exists(cur, 'lines')
+
