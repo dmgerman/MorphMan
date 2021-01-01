@@ -5,6 +5,7 @@ import os
 import pickle as pickle
 import sqlite3
 import itertools
+from pathlib import Path
 
 from abc import ABC, abstractmethod
 
@@ -328,32 +329,30 @@ class MorphDb:
         par = os.path.split(path)[0]
         if not os.path.exists(par):
             os.makedirs(par)
-        f = gzip.open(path, 'wb')
 
-        data = {'db': self.db,
-                'meta': self.meta
-                }
-        pickle.dump(data, f, -1)
-        f.close()
-#        if cfg('saveSQLite'):
-        save_db(path, self.db.keys(), self.db.items() )
+        if (cfg('useSQLite')):
+            save_db(path, self.db.keys(), self.db.items() )
+        else:
+            # save the old format too, for the time being
+            f = gzip.open(path, 'wb')
 
-    def print_db(self):
-        print("morphs and locations")
-        for (m, locs) in self.db.items():
-            print(m)
-            print(locs)
-        print("groups")
-        for (g, morphs) in self.groups.items():
-            print(g)
-            print(morphs)
+            data = {'db': self.db,
+                    'meta': self.meta
+                    }
+            pickle.dump(data, f, -1)
+            f.close()
+
 
     def load(self, path):  # FilePath -> m ()
-        print("Loading database", path)
-        if (True):
+        print("Loading database...", path)
+
+        # we are loading either format, with priority to sqlite
+
+        if db_is_sqlite(path):
             
+            print("Loading SQL database", path)
+
             (morphs, self.db) = load_db(path)
-            print("after Loading database", path)
 
             # now we need to do the GroupKey
             # TODO rewrite without mutation
@@ -364,27 +363,25 @@ class MorphDb:
                 else:
                     self.groups[gk].add(m)
 
-            self.print_db()
-            return
-
-        f = gzip.open(path)
-        try:
-            data = MorphDBUnpickler(f).load()
-            if 'meta' in data:
-                self.meta = data['meta']
-                db = data['db']
-            else:
-                db = data
-            for m, locs in db.items():
-                self.addMLs1(m, locs)
-        except ModuleNotFoundError as e:
-            aqt.utils.showInfo(
+        else:
+            f = gzip.open(path)
+            try:
+                data = MorphDBUnpickler(f).load()
+                if 'meta' in data:
+                    self.meta = data['meta']
+                    db = data['db']
+                else:
+                    db = data
+                for m, locs in db.items():
+                    self.addMLs1(m, locs)
+            except ModuleNotFoundError as e:
+                aqt.utils.showInfo(
                 "ModuleNotFoundError was thrown. That probably means that you're using database files generated in "
                 "the older versions of MorphMan. To fix this issue, please refer to the written guide on database "
                 "migration (copy-pasteable link will appear in the next window): "
                 "https://gist.github.com/InfiniteRain/1d7ca9ad307c4203397a635b514f00c2")
-            raise e
-        f.close()
+                raise e
+            f.close()
 
     # Returns True if DB has variations that can match 'm'.
     def matches(self, m):  # Morpheme
@@ -763,27 +760,14 @@ def save_db_morph_counts(cur, fileidx, counts, do_create_table= False):
 
 def save_db(path, morphs, locations):
     # assume that the directory is already created...
+
     # exceptions will handle the errors
 
-    # we need to wedge this code in here, while we refactor the code...
-    # morphman stores info in a bunch of files.
-    #
-    # database with each "file" as a table
-    # so let use the basefilename of the relation as
-
-    dbName = path + ".sqlite"
-
-    conn = connect_db(dbName)
+    conn = connect_db(path)
     with conn:
         cur = conn.cursor()
-        # it looks like we only need to save the "all" data
-        # the others seem to be subsets of it (based on the
-        # maturity field)
 
-        # add an unique int to identify the morph in the database
-        # assumes that all morphs are unique
-        # create a dictionary to add this 'key' to the locations
-
+        # create numerical ids for each morph
         morph_to_id = dict(zip(morphs, itertools.count()))
            
         save_db_all_morphs(cur, morph_to_id)
@@ -793,7 +777,7 @@ def save_db(path, morphs, locations):
         save_db_locations(cur, locations, morph_to_id)
         conn.commit()
 
-    print("Saved to sqlite dbname [%s]"%(dbName))
+    print("Saved to sqlite dbname [%s]"%(path))
 
 def convert_tuples_to_morph_locations(cur, query, tuples_to_morph_locations):
     # the query results has to be grouped by because we must need to have a set
@@ -821,13 +805,10 @@ order by morphid, noteid, field
         assert len(tuples)>0, "There should be at least one tuple here"
         mid = tuples[0][0]
         # check the values
-        for t in tuples:
-            assert t[0] == mid, "mid in list of tuples should match"
-        print("------------------------------------")
-        print(tuples)
+        #for t in tuples:
+        #    assert t[0] == mid, "mid in list of tuples should match"
         # create set of locations
         locs = set(map(lambda x: AnkiDeck(x[1],x[2],x[3],x[4],x[5],x[6]), tuples))
-        print("done with tuples")
         return (mid_to_morph_dict[mid], locs)
 
     return convert_tuples_to_morph_locations(cur, query, tuples_to_morph_locations)
@@ -847,14 +828,13 @@ select %s from %s order by morphid, filename, line
         tuples = list(tuples)
         assert len(tuples)>0, "There should be at least one tuple here"
         mid = tuples[0][0]
+        
         # check the values
-        for t in tuples:
-            assert t[0] == mid, "mid in list of tuples should match"
-        print("------------------------------------")
-        print(tuples)
+        #for t in tuples:
+        #    assert t[0] == mid, "mid in list of tuples should match"
         # create set of locations
+        
         locs = set(map(lambda x: TextFile(x[1],x[2],x[3]), tuples))
-        print("done with tuples")
         return (mid_to_morph_dict[mid], locs)
 
     return convert_tuples_to_morph_locations(cur, query, tuples_to_morph_locations)
@@ -877,10 +857,6 @@ def merge_locs_dict(a, b):
 def load_db(path):
 
     # returns (morphs, locations)
-    # it ends with .db so cut it
-    assert path.endswith('.sqlite'), "extension is no longer .db?"
-
-    # name of the morphs to save (all, known, etc.)
 
     print("reading from db", path)
 
@@ -896,18 +872,13 @@ def load_db(path):
         #    mature
         print("reading morphs")
         mid_to_morph_dict = read_db_all_morphs_as_dict(cur, 'morphs')
-            
-        print("reading morphs done")
-
         # read a list of all the locations
         # returns a dictionary: morph object -> location object
-
+        print("reading morphs done")
         anki_locs_dict = read_db_anki_locations(cur, mid_to_morph_dict)
         print("reading anki locs done")
-
         text_file_locs_dict = read_db_text_file_locations(cur, mid_to_morph_dict)
         print("reading text locs done")
-
         merged = merge_locs_dict(anki_locs_dict, text_file_locs_dict)
         print("merged locs")
 
@@ -947,3 +918,19 @@ def read_db_table_exists(cur, tname):
 def read_db_has_locations_table(cur):
     return read_db_table_exists(cur, 'lines')
 
+def db_is_sqlite(path):
+    if not os.path.exists(path):
+        return False
+
+    try:
+        print ("Trying to determine if [%s] is sqlite..."%path)
+
+        conn = connect_db(path)
+        with conn:
+            cur = conn.cursor()
+            cur.execute('pragma schema_version;')
+        print("yes, it is")
+        return True
+    except:
+        print("it is not...")
+        return False

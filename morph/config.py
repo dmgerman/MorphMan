@@ -5,13 +5,13 @@ from aqt import mw  # this script isn't imported until profile is loaded
 # 4th (lowest) priority
 default = {
     'path_dbs': os.path.join(mw.pm.profileFolder(), 'dbs'),
-    'path_priority': os.path.join(mw.pm.profileFolder(), 'dbs', 'priority.db'),
-    'path_ext': os.path.join(mw.pm.profileFolder(), 'dbs', 'external.db'),
+    'path_priority': os.path.join(mw.pm.profileFolder(), 'dbs', 'priority.db.sqlite'),
+    'path_ext': os.path.join(mw.pm.profileFolder(), 'dbs', 'external.db.sqlite'),
     'path_frequency': os.path.join(mw.pm.profileFolder(), 'dbs', 'frequency.txt'),
-    'path_all': os.path.join(mw.pm.profileFolder(), 'dbs', 'all.db'),
-    'path_mature': os.path.join(mw.pm.profileFolder(), 'dbs', 'mature.db'),
-    'path_known': os.path.join(mw.pm.profileFolder(), 'dbs', 'known.db'),
-    'path_seen': os.path.join(mw.pm.profileFolder(), 'dbs', 'seen.db'),
+    'path_all': os.path.join(mw.pm.profileFolder(), 'dbs', 'all.db.sqlite'),
+    'path_mature': os.path.join(mw.pm.profileFolder(), 'dbs', 'mature.db.sqlite'),
+    'path_known': os.path.join(mw.pm.profileFolder(), 'dbs', 'known.db.sqlite'),
+    'path_seen': os.path.join(mw.pm.profileFolder(), 'dbs', 'seen.db.sqlite'),
     'path_log': os.path.join(mw.pm.profileFolder(), 'morphman.log'),
     'path_stats': os.path.join(mw.pm.profileFolder(), 'morphman.stats'),
 
@@ -53,7 +53,7 @@ default = {
     # whether to load existing all.db when recalculating or create one from scratch
     'loadAllDb': True,
     'saveDbs': True,     # whether to save all.db, known.db, mature.db, and seen.db
-    'saveSQLite': True,  # save the data also in an sqlite database
+    'useSQLite': True,  # use SQLite databases if they exist
     # only these can have model overrides
     # whether to modify card Due times based on MorphManIndex. does nothing if relevant notes aren't enabled
     'set due based on mmi': True,
