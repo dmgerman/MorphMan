@@ -13,8 +13,7 @@ sys.path.insert(1, morphDir)
 from morphemes import Morpheme, MorphDb
 
 def show_location(loc):
-    return "\t%s\t%s\t%s\t%s\t%s"%(loc.noteId, loc.fieldName, loc.maturity, loc.guid, loc.weight)
-
+    return "\t" + loc.show()
 
 class Dumpster():
     def __init__(self, path=None, parent=None):
