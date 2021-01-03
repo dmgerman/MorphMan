@@ -638,9 +638,12 @@ class Table_Morphs(Sqlite_Table):
         return dict(map(lambda x: (x[0], create_morph(x[1:])), self.select_all()))
 
 
+# abstract class to deal with different types of locations
+# each type of location is stored in a different table, but processing them is the same
+# aside from converting them to and back into their specific location objects
+# that is done by the abstract methods
 class Table_Locations(Sqlite_Table):
 
-    # this should be 
     def __init__(self, conn, tname, fields, constraints, location_name):
         # this table only stores locations of this type of location:
         self.location_name_to_store = location_name
@@ -648,12 +651,19 @@ class Table_Locations(Sqlite_Table):
         super().__init__(conn, tname, fields, constraints)
 
     @abstractmethod
+    # this function should always return the morphid as the very first field
+    # since the groupby iterator relies on that
     def order_by(self):
         return None
 
     @abstractmethod
     def transcode_to_tuple(self, location):
         pass
+
+    @abstractmethod
+    def loc_constructor(loc_tuple):
+        # build a location from a tuple
+        return None
 
     def morph_locations_to_tuples(self, morphWithLocations, morph_to_id):
         # morphWithLocations is a pair of morph and locations
@@ -711,11 +721,6 @@ class Table_Locations(Sqlite_Table):
         if len(tuples) > 0:
             cur.executemany("INSERT INTO %s (%s) VALUES(%s);"%(self.tname, fields, values_markers), tuples)
     
-    @abstractmethod
-    def loc_constructor(loc_tuple):
-        # build a location from a tuple
-        return None
-
     def read_tuples_and_convert_to_morph_locations(self, query, tuples_to_morph_locations):
         # the query results has to be grouped by because we must need to have a set
         # locations for each morph
@@ -732,12 +737,9 @@ class Table_Locations(Sqlite_Table):
         # morph (object) to the location
         fields = self.db_format_query_fields()
 
-        print("fields")
-        print(fields)
-        print(self.tname)
-        print(self.order_by())
-        query = "select %s from %s order by %s"%(fields, self.tname, self.order_by())
-        print(query)
+        orderBy = self.order_by()
+        assert orderBy.lower().startswith('morphid'), "order by should start with morphid"
+        query = "select %s from %s order by %s"%(fields, self.tname, orderBy)
 
         def tuples_to_morph_locations(tuples):
             # tuples is an iterator
