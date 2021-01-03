@@ -878,7 +878,6 @@ class Sqlite_Morph_Db:
         
         return(mid_to_morph_dict.values(), merged)
 
-        
 def save_db(path, morphs, locations):
     db = Sqlite_Morph_Db(path)
     db.save(morphs, locations)
@@ -887,7 +886,230 @@ def load_db(path):
     db = Sqlite_Morph_Db(path)
     return db.load()
 
+#################################################
 
+class Table_Files(Sqlite_Table):
+
+    def __init__(self, conn):
+        
+        fields = {
+            "fileidx"   : "int",
+            "filename"  : "text",
+            "filetype"  : "text"
+        }
+
+        super().__init__(conn, 'files', fields, ", primary key (fileidx)")
+
+    def create_and_save(self, files):
+        # drops table if exists and creates new table
+
+        # morph_to_id is a dictionary of morphs to id
+        # fields  of table to be created
+
+        self.drop_table()
+
+        self.create_table()
+
+        tuples = list(map(lambda file:
+                          (file[0], file[1][0], file[1][1]),
+                          enumerate(files)))
+
+        # insert them all at once
+        cur = self.conn.cursor()
+        cur.executemany("INSERT INTO %s (%s) VALUES(%s);"%
+                             (self.tname,
+                              self.db_format_query_fields(),
+                              self.db_format_query_values_markers()),
+                             tuples)
+
+class Table_Readability_Lines(Sqlite_Table):
+
+    def __init__(self, conn):
+        
+        fields = {
+            "fileidx"   : "int",
+            "line"      : "int",
+            "position"  : "int",
+            "morphid"   : "int"
+        }
+
+        super().__init__(conn, 'lines', fields, ", foreign key (fileidx) references files")
+
+    def save_db_lines_of_file(self, fileidx, lines, do_create_table= False):
+
+        if do_create_table:
+            self.drop_table()
+            self.create_table()
+
+        tuples = list(map(lambda file:
+                          (file[0], file[1][0], file[1][1]),
+                          enumerate(files)))
+
+        # insert them all at once
+        def convert_each_line(lineno, morphs):
+            result = list(map(lambda m: [fileidx, lineno, m[0], m[1]], enumerate(morphs)))
+            return result
+        
+        linesLists = map(lambda line:
+                         convert_each_line(line[0], list(line[1])),
+                         zip(itertools.count(1), lines))
+
+        # flatten the list... because we have a list of lists (one list per morph)
+        tuples = [val for sublist in linesLists for val in sublist]
+
+        cur = self.conn.cursor()
+
+        cur.executemany("INSERT INTO %s (%s) VALUES(%s);"%
+                             (self.tname,
+                              self.db_format_query_fields(),
+                              self.db_format_query_values_markers()),
+                             tuples)
+
+class Table_Readability_Counts(Sqlite_Table):
+
+    def __init__(self, conn):
+        
+        fields = {
+            "fileidx"   : "int",
+            "morphid"   : "int",
+            "nmorphs"    : "int"
+        }
+
+        super().__init__(conn, 'counts', fields, ", foreign key (fileidx) references files")
+
+    def save_db_counts_of_file(self, fileidx, lines, do_create_table= False):
+
+        if do_create_table:
+            self.drop_table()
+            self.create_table()
+
+        tuples = map(lambda count: (fileidx, count[0], count[1]), counts.items())
+
+        cur = self.conn.cursor()
+
+        cur.executemany("INSERT INTO %s (%s) VALUES(%s);"%
+                             (self.tname,
+                              self.db_format_query_fields(),
+                              self.db_format_query_values_markers()),
+                             tuples)
+
+class Sqlite_Readability_Db:
+
+    # incomplete code.. there are some dependencies that need to be satisfied to be able to get
+    # this code to work
+
+    def __init__(self, path):
+        # assumes that the directory is already created
+        self.path = path
+        self.conn = sqlite3.connect(path)
+        # make sure it is a database
+        cur = self.conn.cursor()
+        cur.execute('pragma schema_version;')
+
+    def get_filename_by_index(self, fileidx):
+        query = 'SELECT filename from files where fileidx = %d'%fileidx
+        cur = self.conn.cursor()
+        cur.execute(query)
+        result = cur.fetchone()
+        return None if result == None else result[0]
+
+    def table_exists(self, tname):
+        query = "SELECT name FROM sqlite_master WHERE type='table' AND name=?"
+        cur = self.conn.cursor()
+        cur.execute(query, (tname,))
+        return len(cur.fetchall()) > 0
+
+    def has_lines_table(cur):
+        return self.table_exists(self, 'lines')
+
+        
+
+##################################################
+# sqlite code
+#
+# some of this needs to be removed
+# but the readability manager still relies on it
+
+def connect_db(path):
+    conn = sqlite3.connect(path)
+    return conn
+
+def drop_table(cur, name):
+    sql = "drop table if exists %s;"%(name)
+    cur.execute(sql)
+
+def create_table(cur, name, fields, extra = ""):
+    sql = "create table %s (%s%s);"%(name,fields, extra)
+    cur.execute(sql)
+
+# helper functions to convert morphman objectsi into sql tuples
+def transcode_morph(item):
+    return (item.norm, item.base, item.inflected, item.read, item.pos, item.subPos)
+
+    
+def save_db_all_morphs(cur, morph_to_id, tname='morphs'):
+
+    # morph_to_id is a dictionary of morphs to id
+
+    # fields  of table to be created
+    fields = "morphid, norm, base, inflected, read, pos, subpos"
+
+    drop_table(cur, tname)
+
+    create_table(cur, tname,fields, ", primary key (morphid)")
+
+    def transcode_item_pair(el):
+        # el is a pair: <morph object, int>
+        # this is a helper function for the map below
+        item = el[0]
+        return (el[1],)+ transcode_morph(item)
+
+    # convert the info in the dict of morphs into list of tuples
+    tuples = map(transcode_item_pair, morph_to_id.items())
+
+    # insert them all at once
+    cur.executemany("INSERT INTO %s (%s) VALUES(?,?,?,?,?,?,?);"%(tname,fields), tuples)
+
+def read_db_all_morphs(cur):
+    # read the morphs as a dictionary, where the key is the morph tuple and
+    # the value is the morphid
+    # see save_db_all_morphs for the schema of the morphs relation
+    
+    cur.execute("SELECT * FROM morphs;")
+    rows = cur.fetchall()
+    forDict = map(lambda x: (x[1:], x[0]), rows)
+    return dict(forDict)
+
+def morph_locations_to_tuples(morphWithLocations, morph_to_id, f_transcode, loc_name):
+    # morphWithLocations is a pair of morph and locations
+    # we need to return a list of tuples (morphid, location info...)
+    morph, locs = morphWithLocations
+    return list(map(lambda y: (morph_to_id[morph],) +f_transcode(y),
+                    filter(lambda x: x.name()== loc_name ,locs)))
+
+def convert_locations_to_tuples(locations, morph_to_id, f_transcode, tag):
+
+    # we need to convert the db of morphs into a list of tuples
+    # where the first value is the morphid
+
+    # but only if the location has certain tag
+    
+    # each location is a pair: morph, list of locations
+
+    # f_transcode is the function to convert the attributes of the location
+    # to a tuple. the morphid is spliced first into this tuple
+
+    
+    locationsLists =map(lambda x: # x is a pair of morph and list of locations
+                        morph_locations_to_tuples(x, morph_to_id, f_transcode, tag),
+                        locations)
+
+    # flatten the list... because we have a list of tuples (one list per morph)
+    # note that this list might be empty
+    return [val for sublist in locationsLists for val in sublist]
+
+
+        
 def save_db_files(cur, files):
     tname = 'files'
     # save a morphman db as a table in database
@@ -950,7 +1172,7 @@ def save_db_morph_counts(cur, fileidx, counts, do_create_table= False):
 
     tname = 'morph_counts'
     # fields for the table
-    fields = "fileidx int, morphid int, nmorphs int"
+    fields = "fileidx, morphid, nmorphs"
 
     # it is usually faster to drop the table than delete/update the tuples
     # in it
@@ -968,9 +1190,24 @@ def save_db_morph_counts(cur, fileidx, counts, do_create_table= False):
 
 
 
+def convert_tuples_to_morph_locations(cur, query, tuples_to_morph_locations):
+    # the query results has to be grouped by because we must need to have a set
+    # locations for each morph
+    iter_per_morph_loc = itertools.groupby(cur.execute(query), lambda x: x[0])
 
+    morphs_with_loc = dict(map(tuples_to_morph_locations,
+                      [list(v) for k,v in iter_per_morph_loc]))
 
+    return morphs_with_loc
 
+def read_db_all_morphs_as_dict(cur, tname):
+
+    def create_morph(m):
+        return Morpheme(m[0],m[1],m[2],m[3],m[4],m[5])
+
+    query = 'SELECT morphid, norm, base, inflected, read, pos, subpos FROM ' + tname
+    
+    return dict(map(lambda x: (x[0], create_morph(x[1:])), cur.execute(query)))
 
 def read_db_all_morph_counts_iter_per_file_ordered(cur):
     query ='''
@@ -986,7 +1223,6 @@ def read_db_all_lines_iter_per_file_ordered(cur):
     
     return itertools.groupby(cur.execute(query),
                              lambda x: x[0])
-
 
 def read_db_get_filename_by_index(cur, fileidx):
     
@@ -1011,7 +1247,7 @@ def db_is_sqlite(path):
     try:
         print ("Trying to determine if [%s] is sqlite..."%path)
 
-        conn = sqlite3.connect(path)
+        conn = connect_db(path)
         with conn:
             cur = conn.cursor()
             cur.execute('pragma schema_version;')
@@ -1020,3 +1256,5 @@ def db_is_sqlite(path):
     except:
         print("it is not...")
         return False
+
+
