@@ -694,7 +694,6 @@ class Table_Locations(Sqlite_Table):
         # note that this list might be empty
         return [val for sublist in locationsLists for val in sublist]
     
-    # reuse constructor of superclass
     def create_and_save(self, locations, morph_to_id):
         #
         # save the locations of type anki-deck to given table
