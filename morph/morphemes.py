@@ -765,7 +765,7 @@ class Table_Locations_Anki_Deck(Table_Locations):
             "field" : "text",
             "fieldvalue" : "text",
             "guid" : "text",
-            "maturity" : "int",
+            "maturity" : "real",
             "weight" : "int"
         }
 
@@ -783,7 +783,8 @@ class Table_Locations_Anki_Deck(Table_Locations):
         # build a location from a tuple
         # note that x is a tuple (see fields above, we do not need the morphid)
         # since sqlite is a non-type database, we make sure the int attributes are int
-        return AnkiDeck(int(x[1]),x[2],x[3],x[4],int(x[5]),int(x[6]))
+        return AnkiDeck(noteId=int(x[1]),fieldName=x[2],fieldValue=x[3],
+                        guid=x[4],maturity=float(x[5]),weight=int(x[6]))
 
 class Table_Locations_Text_File(Table_Locations):
 
@@ -793,7 +794,7 @@ class Table_Locations_Text_File(Table_Locations):
             "morphid" : "int",
             "filename" : "text",
             "line" : "int",
-            "maturity" : "int"
+            "maturity" : "real"
         }
 
         super().__init__(conn, 'file_locs', fields,
@@ -807,7 +808,7 @@ class Table_Locations_Text_File(Table_Locations):
         return "morphid, filename, line"
         
     def loc_constructor(self, x):
-        return TextFile(x[1],int(x[2]),int(x[3]))
+        return TextFile(filePath=x[1],lineNo=int(x[2]),maturity=float(x[3]))
 
 class Sqlite_Morph_Db:
     def __init__(self, path):
